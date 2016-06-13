@@ -52,6 +52,13 @@ def build_cli_parser():
     parser.add_option("-u", "--usename", action="store", default="cb",
                       dest="username",
                       help="RabbitMQ username; see /etc/cb/cb.conf")
+    parser.add_option("-f", "--forwarder", action="store", default=None,
+                      dest="forwarder",
+                      help="Absolute path to forwarder config file")
+    parser.add_option(
+        "-e", "--events", action="store", default="#", dest="events",
+        help="comma separated list of routing keys to subscribe to"
+    )
     return parser
 
 
@@ -62,7 +69,28 @@ if __name__ == "__main__":
     #
     parser = build_cli_parser()
     opts, args = parser.parse_args(sys.argv)
-    if not opts.password:
+
+    mqpass = opts.password
+    kv = {}
+
+    # if forwarder is specified, look for password there
+    if opts.forwarder is not None:
+        try:
+            with open(opts.forwarder, 'r') as f:
+                for line in f.readlines():
+                    try:
+                        (k, v) = line.split("=")
+                    except (ValueError, AttributeError) as _:
+                        pass
+                    else:
+                        kv[k] = v
+        except IOError:
+            pass
+
+    if kv.get('rabbit_mq_password') is not None:
+        mqpass = kv['rabbit_mq_password']
+
+    if not mqpass:
         print "Missing password param; run with -h for usage"
         sys.exit(-1)
 
@@ -83,7 +111,12 @@ if __name__ == "__main__":
     # with events when this program exists.
     channel.queue_declare(queue=queue_name, auto_delete=True)
 
-    channel.queue_bind(exchange='api.events', queue=queue_name, routing_key='#')
+    keys = opts.events.split(",")
+
+    for key in keys:
+        channel.queue_bind(
+            exchange='api.events', queue=queue_name, routing_key=key.strip()
+        )
 
     channel.basic_consume(on_message, queue=queue_name)
 
